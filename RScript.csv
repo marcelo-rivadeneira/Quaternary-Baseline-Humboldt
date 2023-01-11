@@ -1,0 +1,508 @@
+rm(list = ls())
+############################################################################################################
+# R Code to reproduce figures 1-5 of
+# Rivadeneira, M.M. & S.N.Nielsen. Deep Anthropogenic Impacts on benthic marine diversity of the Humboldt 
+# Current Marine Ecosystem: insights from a Quaternary fossil baseline. Frontiers in Marine Science, 
+# Sec. Marine Evolutionary Biology, Biogeography and Species Diversity. 9:948580. doi: 10.3389/fmars.2022.948580
+# Code written by Marcelo Rivadeneira, April-July 2022
+# marcelo.rivadeneira@ceaza.cl
+############################################################################################################
+
+library(readxl)
+library(tcltk)
+## Loading working files
+setwd(tk_choose.dir(getwd()))
+"dato=read_excel(""Dataset1.xlsx"",sheet = ""Database"",col_types = ""guess"")"
+dato$Year=as.numeric(as.character(dato$Year))
+dato$IndCorr=as.numeric(as.character(dato$IndCorr))
+dato=as.data.frame(dato)
+
+############################################################################################################
+# Basic stats
+############################################################################################################
+nrow(dato) # total occurrences in the database
+sum(dato$IndCorr,na.rm = T) # total individuals in the database
+length(levels(as.factor(dato$AphiaID_accepted))) # total species in the database
+length(levels(as.factor(dato$Order))) # total orders in the database, but 2 are NAs
+length(levels(as.factor(dato$Family))) # total families in the database
+"length(levels(as.factor(dato$AphiaID_accepted[dato$Class==""Bivalvia""]))) # total bivalve species"
+"length(levels(as.factor(dato$AphiaID_accepted[dato$Class==""Gastropoda""]))) # total gastropod species"
+"nrow(subset(dato,dato$Timeframe1==""Fossil_Quaternary"")) ## fossil occurrences"
+"length(levels(as.factor(dato$AphiaID_accepted[dato$Timeframe1==""Fossil_Quaternary""]))) # species in fossil assemblages"
+"nrow(subset(dato,dato$Timeframe1==""Modern"")) ## modern occurrences"
+"length(levels(as.factor(dato$AphiaID_accepted[dato$Timeframe1==""Modern""]))) # species in modern assemblages"
+tapply(dato$IndCorr,dato$Timeframe1,sum,na.rm=T) # total individuals in fossil and modern assemblages
+
+
+############################################################################################################
+# Possible taphonomic biases
+############################################################################################################
+
+"sppf=length(levels(as.factor(dato$AphiaID_accepted[dato$Timeframe1==""Modern"" & dato$Genusfossil==""fossilized""]))) # present-day species with fossil genus"
+sppf # modern species belong to a genus having a fossil record
+"sppf/length(levels(as.factor(dato$AphiaID_accepted[dato$Timeframe1==""Modern""]))) # # Proportion of modern species belong to a genus having a fossil record"
+
+sppocc=data.frame(tapply(dato$Timeframe1,list(dato$ScientificName_accepted,dato$Timeframe1),length))
+sppocc$Fossil_Quaternary[is.na(sppocc$Fossil_Quaternary)]=0
+sppocc=na.exclude(sppocc)
+"sppocc$havefossil=ifelse(sppocc$Modern>0 & sppocc$Fossil_Quaternary==0,""nofossil"",""fossilized"")"
+table(sppocc$havefossil) # modern species with a fossil counterpart
+tapply(sppocc$Modern,sppocc$havefossil,sum)
+"tapply(sppocc$Modern,sppocc$havefossil,sum)/nrow(subset(dato,dato$Timeframe1==""Modern""))"
+
+sppabn=data.frame(tapply(dato$IndCorr,list(dato$ScientificName_accepted,dato$Timeframe1),sum,na.rm=T))
+sppabn$Fossil_Quaternary[is.na(sppabn$Fossil_Quaternary)]=0
+sppabn=na.exclude(sppabn)
+"sppabn$havefossil=ifelse(sppabn$Modern>0 & sppabn$Fossil_Quaternary==0,""nofossil"",""fossilized"")"
+tapply(sppabn$Modern,sppabn$havefossil,sum)
+tapply(sppabn$Modern,sppabn$havefossil,sum)/sum(tapply(sppabn$Modern,sppabn$havefossil,sum))
+
+# this get rid of species without a fossil record, or belonging to genera without a fossil counterpart 
+dato$Speciesfossil=sppabn$havefossil[match(dato$ScientificName_accepted,rownames(sppabn))]
+"dato=droplevels(subset(dato,dato$Genusfossil==""fossilized"" | dato$Speciesfossil==""fossilized"")) # get rid of modern species without a fossil record"
+nrow(dato)# number of occurrences
+sum(dato$IndCorr,na.rm = T) # total number of individuals
+length(table(dato$ScientificName_accepted))
+
+############################################################################################################
+# Assigning occurrences to spatial grid cells
+############################################################################################################
+library(raster)
+allcoords=data.frame(x=dato$Lon,y=dato$Lat)
+coordinates(allcoords)=~x+y
+projection(allcoords)=CRS('+proj=longlat +datum=WGS84')
+rdummy=raster(ncol=360, nrow=180)
+extent(rdummy)=extent(allcoords)
+spatial.resolution=c(0.01,0.05,0.1,0.5,1,5,10,25)
+
+grids=NULL
+for(s in 1:length(spatial.resolution))
+{
+  rdumb=rdummy
+  res(rdumb)=spatial.resolution[s]
+  rdumb=rasterize(allcoords, rdumb)
+  grids=cbind(grids,cellFromXY(rdumb,allcoords))
+}
+
+"colnames(grids)=paste(""grid_"",spatial.resolution,sep="""")"
+dato=cbind(dato,grids)
+
+############################################################################################################
+# Dataset to reproduce Map in Figure 1. Data is exported to be plotted in QGIS (or any GIS)
+############################################################################################################
+library(SDMTools)
+library(dplyr)
+"r2=raster(ncol=360, nrow=180);extent(r2)=extent(allcoords)"
+res(r2)=0.5
+coordsites=data.frame(x=dato$Lon,y=dato$Lat,name=1,Timeframe1=dato$Timeframe1)
+"coordsites.fossil=subset(coordsites,coordsites$Timeframe1==""Fossil_Quaternary"")"
+"coordsites.modern=subset(coordsites,coordsites$Timeframe1==""Modern"")"
+"coordinates(coordsites.fossil)=~x+y; projection(coordsites.fossil)=CRS('+proj=longlat +datum=WGS84')"
+"coordinates(coordsites.modern)=~x+y; projection(coordsites.modern)=CRS('+proj=longlat +datum=WGS84')"
+raster.sites.fossil=rasterize(coordsites.fossil, r2,'name',sum)
+raster.sites.modern=rasterize(coordsites.modern, r2,'name',sum)
+"write.asc(asc.from.raster(raster.sites.fossil),""rastersitesfossil.asc"")"
+"write.asc(asc.from.raster(raster.sites.modern),""rastersitesmodern.asc"")"
+uniquecoords=data.frame(coordsites%>%group_by_all%>%count)
+"write.csv(uniquecoords,""coordsites.csv"")"
+
+
+############################################################################################################
+# Useful function to make transparent colors
+# kudos to # https://www.dataanalytics.org.uk/make-transparent-colors-in-r/
+############################################################################################################
+
+t_col=function(color, percent = 50, name = NULL) {
+  #      color = color name
+  #    percent = % transparency
+  #       name = an optional name for the color
+  ## Get RGB values for named color
+  rgb.val <- col2rgb(color)
+  ## Make new color using input color as base and alpha set by transparency
+  t.col <- rgb(rgb.val[1], rgb.val[2], rgb.val[3],
+               max = 255,
+               alpha = (100 - percent) * 255 / 100,
+               names = name)
+  ## Save the color
+  invisible(t.col)
+}
+
+
+############################################################################################################
+# Spatial aggregation of Habitats and time
+############################################################################################################
+spatial.resolution=c(0.01,0.05,0.1,0.5,1,5,10,25)
+"grids=paste(""grid_"",spatial.resolution,sep="""")"
+group.grids=grids
+
+library(vegan)
+msimp=NULL
+thabi=NULL
+timeAvg=NULL
+for(g in 1:8)
+{
+  ## Beta diversity for occurrences
+  datgam=dato
+"  datgam=subset(datgam,datgam$Timeframe1==""Modern"" & !datgam$Habitat==""NA_NA"")"
+  present.habitats=data.frame(tapply(datgam$Timeframe2,list(datgam[,grids[g]],datgam$Habitat),length))
+  present.habitats[is.na(present.habitats)]=0
+"  simphabitat=diversity(present.habitats,""simpson"")"
+  typehabitat=specnumber(present.habitats)
+  msimp=c(msimp,median(simphabitat))
+  thabi=c(thabi,median(typehabitat))
+  
+  yearMax=data.frame(year=tapply(datgam$Year,list(datgam[,group.grids[g]]),max,na.rm=T))
+  yearMin=data.frame(year=tapply(datgam$Year,list(datgam[,group.grids[g]]),min,na.rm=T))
+  yearRan=yearMax-yearMin
+  yearRan[is.infinite(yearRan$year),]=NA
+  timeAvg=c(timeAvg,median(yearRan$year,na.rm=T))
+}
+
+spatial.resolutionKM=spatial.resolution*110.567
+spatial.resolutionKM2=spatial.resolution*100
+
+"jpeg(""Fig2.jpeg"",width=7.5,height=3,units = ""in"",res=300)"
+par(mfrow=c(1,3),mar=c(5.5,5,2,2))
+"plot(spatial.resolutionKM,thabi,type=""o"",log=""x"",pch=21,cex=1.7,col=""skyblue"",bg=""skyblue"","
+"     xlab="""",ylab=""Median (habitat types)"",cex.axis=1.2,cex.lab=1.2,"
+"     xaxt=""n"")"
+axis(1,las=2,floor(spatial.resolutionKM2))
+"mtext(""a. Number of habitats"",side=3,line=0.5,adj=0,cex=1)"
+"mtext(""Spatial aggregation scale (~km)"",side=1,line=3.5,cex=0.8)"
+"plot(spatial.resolutionKM,msimp,type=""o"",log=""x"",pch=21,cex=1.7,col=""chartreuse3"",bg=""chartreuse3"","
+"     xlab="""",ylab=""Median (1-Simpson's divesity)"","
+"     cex.axis=1.2,cex.lab=1.2,xaxt=""n"")"
+axis(1,las=2,floor(spatial.resolutionKM2))
+"mtext(""Spatial aggregation scale (~km)"",side=1,line=3.5,cex=0.8)"
+"mtext(""b. Habitat diversity"",side=3,line=0.5,adj=0,cex=1)"
+"plot(spatial.resolutionKM,timeAvg,type=""o"",log=""x"",pch=21,cex=1.7,col=""coral3"",bg=""coral3"","
+"     xlab="""",ylab=""Median (years spanned)"","
+"     cex.axis=1.2,cex.lab=1.2,xaxt=""n"")"
+axis(1,las=2,floor(spatial.resolutionKM2))
+"mtext(""Spatial aggregation scale (~km)"",side=1,line=3.5,cex=0.8)"
+"mtext(""c. Time-average"",side=3,line=0.5,adj=0,cex=1)"
+dev.off()
+
+############################################################################################################
+# Stability among fossil intervals at multiple spatial scales
+############################################################################################################
+"dato.fossil1=droplevels(subset(dato,dato$Timeframe1==""Fossil_Quaternary"" & !dato$Timeframe2==""NA""))"
+
+adonisP.occ=NULL
+adonisP.abn=NULL
+for(g in 1:7)
+{
+  ## Beta diversity for occurrences
+  datgum=dato.fossil1
+"  datgum$focalgrid=paste(datgum[,grids[g]],datgum$Timeframe2,sep=""_"")"
+  comp.fossil.occ=tapply(datgum$IndCorr,list(datgum$focalgrid,datgum$ScientificName_accepted),length)
+  comp.fossil.occ[is.na(comp.fossil.occ)]=0
+  comp.fossil.occ=bipartite::empty(comp.fossil.occ)
+  fossil.sitios.occ=data.frame(focalgrid=rownames(as.matrix(comp.fossil.occ)))
+  fossil.sitios.occ$Timeframe2=datgum$Timeframe2[match(fossil.sitios.occ$focalgrid,datgum$focalgrid)]
+"  dist.comp.fossil.occ=vegdist(comp.fossil.occ,""chao"")"
+  apollo.occ=adonis2(dist.comp.fossil.occ~Timeframe2,data=fossil.sitios.occ,permutations=9999)
+  adonisP.occ=c(adonisP.occ,apollo.occ$`Pr(>F)`[1])
+  
+  comp.fossil.abn=tapply(datgum$IndCorr,list(datgum$focalgrid,datgum$ScientificName_accepted),sum,na.rm=T)
+  comp.fossil.abn[is.na(comp.fossil.abn)]=0
+  comp.fossil.abn=bipartite::empty(comp.fossil.abn)
+  fossil.sitios.abn=data.frame(focalgrid=rownames(as.matrix(comp.fossil.abn)))
+  fossil.sitios.abn$Timeframe2=datgum$Timeframe2[match(fossil.sitios.abn$focalgrid,datgum$focalgrid)]
+"  dist.comp.fossil.abn=vegdist(comp.fossil.abn,""chao"")"
+  apollo.abn=adonis2(dist.comp.fossil.abn~Timeframe2,data=fossil.sitios.abn,permutations=9999)
+  adonisP.abn=c(adonisP.abn,apollo.abn$`Pr(>F)`[1])
+  
+}
+
+# nMDS at 0.5º resolution (ca. 55 km)
+# repeat the previous loop but setting g=3
+datgum=dato.fossil1
+"datgum$focalgrid=paste(datgum[,grids[4]],datgum$Timeframe2,sep=""_"")"
+comp.fossil.occ=tapply(datgum$IndCorr,list(datgum$focalgrid,datgum$ScientificName_accepted),length)
+comp.fossil.occ[is.na(comp.fossil.occ)]=0
+comp.fossil.occ=bipartite::empty(comp.fossil.occ)
+fossil.sitios.occ=data.frame(focalgrid=rownames(as.matrix(comp.fossil.occ)))
+fossil.sitios.occ$Timeframe2=datgum$Timeframe2[match(fossil.sitios.occ$focalgrid,datgum$focalgrid)]
+"dist.comp.fossil.occ=vegdist(comp.fossil.occ,""chao"")"
+NMDSocc=metaMDS(dist.comp.fossil.occ,k=2,try=100)
+"colortime=data.frame(time=c(""Chibanian"",""Upper Pleistocene"",""Holocene""),colors=c(""gold"",""chartreuse4"",""skyblue""))"
+colortime=colortime[c(1,2,3),]
+fossil.sitios.occ$color=colortime$colors[match(fossil.sitios.occ$Timeframe2,colortime$time)]
+
+datgum=dato.fossil1
+"datgum$focalgrid=paste(datgum[,grids[4]],datgum$Timeframe2,sep=""_"")"
+comp.fossil.abn=tapply(datgum$IndCorr,list(datgum$focalgrid,datgum$ScientificName_accepted),sum,na.rm=T)
+comp.fossil.abn[is.na(comp.fossil.abn)]=0
+comp.fossil.abn=bipartite::empty(comp.fossil.abn)
+fossil.sitios.abn=data.frame(focalgrid=rownames(as.matrix(comp.fossil.abn)))
+fossil.sitios.abn$Timeframe2=datgum$Timeframe2[match(fossil.sitios.abn$focalgrid,datgum$focalgrid)]
+"dist.comp.fossil.abn=vegdist(comp.fossil.abn,""chao"")"
+NMDSabn=metaMDS(dist.comp.fossil.abn,k=2,try=200)
+fossil.sitios.abn$color=colortime$colors[match(fossil.sitios.abn$Timeframe2,colortime$time)]
+"colortime=data.frame(time=c(""Chibanian"",""Upper Pleistocene"",""Holocene""),colors=c(""gold"",""chartreuse4"",""red""))"
+colortime=colortime[c(1,3,2),]
+fossil.sitios.occ$color=colortime$colors[match(fossil.sitios.occ$Timeframe2,colortime$time)]
+
+# Figure 2
+"jpeg(""Fig3.jpeg"",width=11,height=8,units=""in"",res=300)"
+par(mfrow=c(2,2),mar=c(5,5,2,2))
+"plot(spatial.resolutionKM[1:7],adonisP.occ,type=""o"",log=""xy"",ylim=c(0.01,1),pch=21,cex=1.7,col=""skyblue"",bg=""skyblue"","
+"     xlab="""",ylab=""P-value"",cex.axis=1.5,cex.lab=1.5,xaxt=""n"")"
+axis(1,las=2,spatial.resolutionKM2,cex.axis=1.5)
+"lines(x=c(0.01,1500),y=c(0.05,0.05),lty=2,col=""red"")"
+"mtext(""a"",side=3,line=0.5,adj=0,cex=1.5)"
+"mtext(""Spatial aggregation scale (~km)"",side=1,line=4,cex=1.2)"
+
+"plot(spatial.resolutionKM[1:7],adonisP.abn,type=""o"",log=""xy"",ylim=c(0.01,1), pch=21,cex=1.7,col=""skyblue"",bg=""skyblue"","
+"     xlab="""",ylab=""P-value"",cex.axis=1.5,cex.lab=1.5,xaxt=""n"")"
+axis(1,las=2,spatial.resolutionKM2,cex.axis=1.5)
+"lines(x=c(0.01,1500),y=c(0.05,0.05),lty=2,col=""red"")"
+"mtext(""b"",side=3,line=0.5,adj=0,cex=1.5)"
+"mtext(""Spatial aggregation scale (~km)"",side=1,line=4,cex=1.2)"
+
+"ordiplot(NMDSocc,type=""n"",cex.axis=1.5,cex.lab=1.5) "
+"points(NMDSocc,""sites"",pch=3,col=""gray20"")"
+"ordihull(NMDSocc,groups=fossil.sitios.occ$Timeframe2,draw=""polygon"","
+         col=colortime$colors,border=colortime$colors)
+"legend(""bottomleft"",c(""Chibanian"",""Upper Pleistocene"",""Holocene"")"
+"       ,pt.bg = c(t_col(""gold""),t_col(""chartreuse4""),t_col(""red"")),pch=22,bty=""n"",col=c(t_col(""gold""),t_col(""chartreuse4""),t_col(""red"")))"
+mtext(bquote(Stress==.(round(NMDSocc$stress,3))),cex=1,side=3,line=-1,adj=0)
+"mtext(""c"",side=3,line=0.5,adj=0,cex=1.5)"
+
+"ordiplot(NMDSabn,type=""n"",cex.axis=1.5,cex.lab=1.5) "
+"points(NMDSabn,""sites"",pch=3,col=""gray20"")"
+"ordihull(NMDSabn,groups=fossil.sitios.abn$Timeframe2,draw=""polygon"","
+         col=colortime$colors,border=colortime$colors)
+"legend(""bottomleft"",c(""Chibanian"",""Upper Pleistocene"",""Holocene"")"
+"       ,pt.bg = c(t_col(""gold""),t_col(""chartreuse4""),t_col(""red"")),pch=22,bty=""n"",col=c(t_col(""gold""),t_col(""chartreuse4""),t_col(""red"")))"
+mtext(bquote(Stress==.(round(NMDSabn$stress,3))),cex=1,side=3,line=-1,adj=0)
+"mtext(""d"",side=3,line=0.5,adj=0,cex=1.5)"
+dev.off()
+
+############################################################################################################
+# Fossil vs Modern: Changes in species richness and dominance
+############################################################################################################
+library(iNEXT)
+library(metafor)
+
+Effect.species.fossil=NULL
+Effect.species.modern=NULL
+Effect.simpson.fossil=NULL
+Effect.simpson.modern=NULL
+Pv.Species=NULL
+Pv.Simpson=NULL
+for(g in 1:7)
+{
+  print(g)
+  daton=dato
+"  daton$focalgrid=paste(daton[,grids[g]],daton$Timeframe1,sep=""_"")"
+  mat.abn=tapply(daton$IndCorr,list(daton$focalgrid,daton$ScientificName_accepted),sum,na.rm=T)
+  mat.abn[is.na(mat.abn)]=0
+  mat.abn=bipartite::empty(mat.abn)
+"  InextSimp=ChaoSimpson(t(mat.abn), datatype=""abundance"")"
+"  InextChao=ChaoRichness(t(mat.abn),datatype = ""abundance"", conf = 0.95)"
+"  InextInfo=iNEXT(t(mat.abn),datatype=""abundance"")"
+  InextInfo=InextInfo$DataInfo
+  InextOuta=cbind(InextInfo[,1:3],InextChao[,2:3],InextSimp[,2:3])
+"  names(InextOuta)[4:7]=c(""Spp"",""seSpp"",""Simpson"",""seSimpson"")"
+  InextOuta$Timeframe1=daton$Timeframe1[match(InextOuta$site,daton$focalgrid)]
+"  InextOuta$Timeframe1dum=ifelse(InextOuta$Timeframe1==""Modern"",1,0)"
+  InextOuta=subset(InextOuta,InextOuta$n>=50)
+  InextOuta$sdSpp=InextOuta$seSpp*sqrt(InextOuta$S.obs)
+  InextOuta$sdSimpson=InextOuta$seSimpson*sqrt(InextOuta$S.obs)
+"  tabla.meta.species=escalc(measure=""MN"", mi=Spp,sdi=sdSpp, ni=n, data=InextOuta) # MNLN"" for the log transformed mean,"
+"  tabla.meta.simpson=escalc(measure=""MN"", mi=Simpson,sdi=sdSimpson, ni=n, data=InextOuta) #MNLN"" for the log transformed mean,"
+  meta.species=rma(yi, vi,mods = ~ Timeframe1dum, data=tabla.meta.species)
+  meta.simpson=rma(yi, vi,mods = ~ Timeframe1dum, data=tabla.meta.simpson)
+  meta.species.pred=predict(meta.species,newmods=c(0,1))
+  meta.species.simp=predict(meta.simpson,newmods=c(0,1))
+  ES.species.fossil=cbind(meta.species.pred$pred[1],meta.species.pred$ci.lb[1],meta.species.pred$ci.ub[1])
+  ES.species.modern=cbind(meta.species.pred$pred[2],meta.species.pred$ci.lb[2],meta.species.pred$ci.ub[2])
+  ES.simpson.fossil=cbind(meta.species.simp$pred[1],meta.species.simp$ci.lb[1],meta.species.simp$ci.ub[1])
+  ES.simpson.modern=cbind(meta.species.simp$pred[2],meta.species.simp$ci.lb[2],meta.species.simp$ci.ub[2])
+  Effect.species.fossil=rbind(Effect.species.fossil,ES.species.fossil)
+  Effect.species.modern=rbind(Effect.species.modern,ES.species.modern)
+  Effect.simpson.fossil=rbind(Effect.simpson.fossil,ES.simpson.fossil)
+  Effect.simpson.modern=rbind(Effect.simpson.modern,ES.simpson.modern)
+  Pv.Species=c(Pv.Species,meta.species$pval[2])
+  Pv.Simpson=c(Pv.Simpson,meta.simpson$pval[2])
+}
+
+############################################################################################################
+# Fossil vs Modern: Changes in species composition
+############################################################################################################
+
+chao.diss=NULL
+chaoP=NULL
+for(g in 1:7)
+{
+  print(g)
+  daton=dato
+"  daton$focalgrid=paste(daton[,grids[g]],daton$Timeframe1,sep=""_"")"
+  mat.abn=tapply(daton$IndCorr,list(daton$focalgrid,daton$ScientificName_accepted),sum,na.rm=T)
+  mat.abn[is.na(mat.abn)]=0
+  mat.abn=bipartite::empty(mat.abn)
+  datonsites=data.frame(focalgrid=rownames(mat.abn))
+  datonsites$Timeframe1=daton$Timeframe1[match(datonsites$focalgrid,daton$focalgrid)]
+"  chao.mat.abn=as.matrix(vegdist(mat.abn,""chao""))"
+"  chao.mat.abn=chao.mat.abn[datonsites$focalgrid[datonsites$Timeframe1==""Modern""],"
+"                            datonsites$focalgrid[datonsites$Timeframe1==""Fossil_Quaternary""]]"
+  chao.diss=c(chao.diss,median(chao.mat.abn))
+  
+"  apollocreed=adonis2(vegdist(mat.abn,""chao"")~Timeframe1,data=datonsites,permutations=9999)"
+  chaoP=c(chaoP,apollocreed$`Pr(>F)`[1])
+}
+
+
+############################################################################################################
+# Fossil vs Modern: Changes in species composition, nMDS ilustration
+############################################################################################################
+"daton$focalgrid=paste(daton[,grids[5]],daton$Timeframe1,sep=""_"")## at 1º resolution (ca. 111km)"
+mat.abn=tapply(daton$IndCorr,list(daton$focalgrid,daton$ScientificName_accepted),sum,na.rm=T)
+mat.abn[is.na(mat.abn)]=0
+mat.abn=bipartite::empty(mat.abn)
+datonsites=data.frame(focalgrid=rownames(mat.abn))
+datonsites$Timeframe1=daton$Timeframe1[match(datonsites$focalgrid,daton$focalgrid)]
+"chao.mat.abn=as.matrix(vegdist(mat.abn,""chao""))"
+
+NMDSabn=metaMDS(chao.mat.abn,k=2,try=200)
+par(oma=c(0,0,0,0))
+"png(""nMDSexample.png"", width=5, height=5, units=""in"", res=300)"
+"ordiplot(NMDSabn,type=""n"",cex.axis=1.5,cex.lab=1.5) "
+"points(NMDSabn,""sites"",pch=3,col=""gray20"")"
+"ordihull(NMDSabn,groups=datonsites$Timeframe1,draw=""polygon"","
+"         col=c(""skyblue"",""red""),border=c(""skyblue"",""red""))"
+"legend(""bottomleft"",c(""Fossil"",""Modern"")"
+"       ,pt.bg = c(t_col(""skyblue""),t_col(""red"")),pch=22,bty=""n"",col=c(t_col(""skyblue""),t_col(""red"")))"
+text(x=0.4,y=0,bquote(Stress==.(round(NMDSabn$stress,3))),cex=1)
+dev.off()
+
+############################################################################################################
+# Fossil vs Modern: Changes in the relative abundance of exploited vs non-exploited species
+############################################################################################################
+
+Effect.shell.fossil=NULL
+Effect.shell.modern=NULL
+shellfishing.Pvalue=NULL
+for(g in 1:7)
+{
+  print(g)
+  puton=dato
+"  puton$focalgrid=paste(puton[,grids[g]],puton$Timeframe1,sep=""_"")"
+  mat.exp=data.frame(tapply(puton$IndCorr,list(puton$focalgrid,puton$ExploitStatus),sum,na.rm=T))
+  mat.exp[is.na(mat.exp)]=0
+  mat.exp$ExpRatio=mat.exp$Yes/mat.exp$No
+  mat.exp$ExpRatio[is.nan(mat.exp$ExpRatio)]=NA
+  mat.exp$ExpRatio[is.infinite(mat.exp$ExpRatio)]=NA
+  mat.exp=na.exclude(mat.exp)
+  mat.exp$Timeframe1=puton$Timeframe1[match(rownames(mat.exp),puton$focalgrid)]
+  mat.exp$Ind=mat.exp$No+mat.exp$Yes
+  mat.exp=subset(mat.exp,mat.exp$Ind>=50) # at least 50 individuals per site
+"  meta.baseline=escalc(measure=""PR"", xi=Yes, ni=Ind, data=mat.exp,to=""only0"") # raw proportion"
+  meta.baseline.run=rma(yi, vi,mods = ~ Timeframe1, data=meta.baseline)
+  meta.baseline.pred=predict(meta.baseline.run,newmods=c(0,1))
+  ES.shellf.fossil=cbind(meta.baseline.pred$pred[1],meta.baseline.pred$ci.lb[1],meta.baseline.pred$ci.ub[1])
+  ES.shellf.modern=cbind(meta.baseline.pred$pred[2],meta.baseline.pred$ci.lb[2],meta.baseline.pred$ci.ub[2])
+  Effect.shell.fossil=rbind(Effect.shell.fossil,ES.shellf.fossil)
+  Effect.shell.modern=rbind(Effect.shell.modern,ES.shellf.modern)
+  shellfishing.Pvalue=c(shellfishing.Pvalue,meta.baseline.run$pval[2])
+}
+
+
+############################################################################################################
+# Fossil vs Modern: Figure 4
+############################################################################################################
+"xlab=""Spatial aggregation scale (~km)"""
+
+"jpeg(""Fig4.jpeg"",width=11,height=8,units=""in"",res=300)"
+par(mfrow=c(2,2),mar=c(5,4,2,1))
+"plot(spatial.resolutionKM[1:7],Effect.species.fossil[,1],type=""o"",log=""xy"",ylab=""Species richness"","
+"     xlab=xlab,pch=21,bg=""skyblue"", col=""skyblue"",cex=2,cex.axis=1.2,"
+"     cex.lab=1.2,xlim=c(1,1200),ylim=c(10,120),xaxt=""n"")"
+arrows(x0=spatial.resolutionKM[1:7],x1=spatial.resolutionKM[1:7],
+"       y0=Effect.species.fossil[,2],y1=Effect.species.fossil[,3],length=0,col=""skyblue"",lwd=2)"
+"points(spatial.resolutionKM[1:7],Effect.species.modern[,1],type=""o"",cex=2,pch=21,col=""red"",bg=""red"")"
+arrows(x0=spatial.resolutionKM[1:7],x1=spatial.resolutionKM[1:7],
+"       y0=Effect.species.modern[,2],y1=Effect.species.modern[,3],length=0,col=""red"",lwd=2)"
+axis(1,las=2,cex.axis=1.2)
+"text(spatial.resolutionKM[1:7],rep(10,7),round(Pv.Species,3),cex=0.8,col=ifelse(Pv.Species<0.05,""black"",""gray40""))"
+"legend(""topleft"",c(""Fossil"",""Modern""),pch=21,lty=c(1,1),pt.bg = c(""skyblue"",""red""),col=c(""skyblue"",""red""),bty=""n"",cex=1.2)"
+"mtext(""a. species richness"",side=3,adj=0,line=0.5,cex=1.2)"
+
+"plot(spatial.resolutionKM[1:7],Effect.simpson.fossil[,1],type=""o"",log=""x"",ylab=""Simpson's dominance"",xlab=xlab,pch=21,"
+"     bg=""skyblue"", col=""skyblue"",cex=2,cex.axis=1.2,cex.lab=1.2,xlim=c(1,1200),"
+"     ylim=c(0.5,1),xaxt=""n"")"
+"arrows(x0=spatial.resolutionKM[1:7],x1=spatial.resolutionKM[1:7],y0=Effect.simpson.fossil[,2],y1=Effect.simpson.fossil[,3],length=0,col=""skyblue"","
+       lwd=2)
+axis(1,las=2,cex.axis=1.2)
+"points(spatial.resolutionKM[1:7],Effect.simpson.modern[,1],type=""o"",cex=2,pch=21,col=""red"",bg=""red"")"
+arrows(x0=spatial.resolutionKM[1:7],x1=spatial.resolutionKM[1:7],
+"       y0=Effect.simpson.modern[,2],y1=Effect.simpson.modern[,3],length=0,col=""red"",lwd=2)"
+"text(spatial.resolutionKM[1:7],rep(0.5,7),round(Pv.Simpson,3),cex=0.8,col=ifelse(Pv.Simpson<0.05,""black"",""gray40""))"
+"legend(""topleft"",c(""Fossil"",""Modern""),pch=21,lty=c(1,1),pt.bg = c(""skyblue"",""red""),col=c(""skyblue"",""red""),bty=""n"",cex=1.2)"
+"mtext(""b. species dominance"",side=3,adj=0,line=0.5,cex=1.2)"
+
+library(png)
+"PictureNMDS=readPNG(""nMDSexample.png"")"
+"plot(spatial.resolutionKM[1:7],chao.diss,type=""o"",pch=21, col=""chartreuse3"",bg=""chartreuse3"",log=""x"","
+"     ylab=""Dissimilarity"",ylim=c(0,1),xlab=xlab,cex=2,cex.axis=1.2,cex.lab=1.2,xlim=c(1,1200),xaxt=""n"")"
+axis(1,las=2,cex.axis=1.2)
+"mtext(""c. temporal dissimilarity"",side=3,adj=0,line=0.5,cex=1.2)"
+"composition.Pvalue.adj=ifelse(chaoP<0.001,""<0.001"",round(chaoP,3))"
+text(spatial.resolutionKM[1:7],rep(0,7),composition.Pvalue.adj,
+"     cex=0.8,col=ifelse(chaoP<0.05,""black"",""gray40""))"
+rasterImage(PictureNMDS,2,0.1,50,0.85)
+"text(x=10,y=0.80,""~100 km"")"
+
+"plot(spatial.resolutionKM[1:7],Effect.shell.fossil[,1],ylim=c(-0.08,1),type=""o"",log=""x"",ylab=""Proportion of total abundance"",xlab=xlab,pch=21,col=""skyblue"",bg=""skyblue"","
+"     cex=2,cex.axis=1.2,cex.lab=1.2,xlim=c(1,1200),xaxt=""n"")"
+
+arrows(x0=spatial.resolutionKM[1:7],x1=spatial.resolutionKM[1:7],
+"       y0=Effect.shell.fossil[,2],y1=Effect.shell.fossil[,3],length=0,col=""skyblue"",lwd=2)"
+"points(spatial.resolutionKM[1:7],Effect.shell.modern[,1],type=""o"",cex=2,pch=21,col=""red"",bg=""red"")"
+arrows(x0=spatial.resolutionKM[1:7],x1=spatial.resolutionKM[1:7],
+"       y0=Effect.shell.modern[,2],y1=Effect.shell.modern[,3],length=0,col=""red"",lwd=2)"
+"shellfishing.Pvalue.adj=ifelse(shellfishing.Pvalue<0.001,""<0.001"",round(shellfishing.Pvalue,3))"
+"text(spatial.resolutionKM[1:7],rep(-0.05,7),shellfishing.Pvalue.adj,cex=0.8,col=ifelse(Pv.Species<0.05,""black"",""gray40""))"
+"legend(""topleft"",c(""Fossil"",""Modern""),pch=21,lty=c(1,1),pt.bg = c(""skyblue"",""red""),col=c(""skyblue"",""red""),bty=""n"",cex=1.2)"
+"mtext(""d.Relative abundance of exploited species"",side=3,adj=0,line=0.5,cex=1.2)"
+dev.off()
+
+
+############################################################################################################
+# Changes in the relative abundance of exploted species in the recent time (at ca.100 km scale)
+############################################################################################################
+"datpresent=droplevels(subset(dato,dato$Timeframe1==""Modern"" & !dato$Year==""NA""))"
+"datpresent$focalgridyear=paste(datpresent[,grids[5]],datpresent$Year,sep=""_"")"
+mypresent=data.frame(tapply(datpresent$IndCorr,list(datpresent$focalgridyear,datpresent$ExploitStatus),sum,na.rm=T))
+mypresent[is.na(mypresent)]=0
+mypresent$Total=apply(mypresent,1,sum,na.rm=T)
+mypresent$Total[mypresent$Total==0]=NA
+mypresent=na.exclude(mypresent)
+mypresent$year=datpresent$Year[match(rownames(mypresent),datpresent$focalgridyear)]
+mypresent=droplevels(subset(mypresent,mypresent$Total>=10))
+"meta.modernfishing=escalc(measure=""PR"", xi=Yes, ni=Total, data=mypresent,to=""only0"") # raw proportion"
+meta.modernfishing.model=rma(yi, vi,mods = ~ year, data=meta.modernfishing)
+
+
+"jpeg(""Fig5.jpeg"",width=6,height=5,units=""in"",res=300)"
+wi=1/sqrt(meta.modernfishing$vi)
+size=0.5+3*(wi-min(wi))/(max(wi)-min(wi))
+size2=log10(meta.modernfishing$Total)-1.5
+options(scipen = 99)  
+plot(meta.modernfishing$year,log10(meta.modernfishing$yi),
+"     cex=size2,pch=21,col=""gray60"",bg=""red"",xlim=c(1900,2015),"
+"     xlab=""Year"",ylab=expression(paste('log'[""10""],""Relative abundance of exploited species"",sep="" "")),ylim=c(-5,0))"
+"legend(""bottomleft"",pch=21,c(""100"",""1000"",""10000""),pt.bg=""red"",col=""gray60"","
+"       pt.cex=c(0.5,1.5,2.5),bty=""n"",title=""individuals"")"
+dx=c(1948,2020)
+dy=meta.modernfishing.model$b[1]+meta.modernfishing.model$b[2]*dx
+"lines(x=dx,y=log10(dy),lty=2,col=""red"")"
+r2=round(meta.modernfishing.model$R2/100,3)
+pv=round(meta.modernfishing.model$pval[2],3)
+"text(1970,-2,bquote(paste(r^2==.(r2),"", "",p==.(pv),sep="" "")),cex=0.7)"
+quat.base.mean=log10(Effect.shell.fossil[5,1])
+"lines(x=c(1900,1940),y=c(quat.base.mean,quat.base.mean),col=""skyblue"",lty=1,lwd=4)"
+"mtext(""    Quaternary baseline (median)"",side=3,line=-1,cex=0.8,adj=0)"
+dev.off()
